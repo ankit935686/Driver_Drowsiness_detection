@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Driver Drowsiness Control Panel</title>
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="hero">
+        <p class="eyebrow">Phase 2 Backend UI</p>
+        <h1>Driver Drowsiness Control Panel</h1>
+        <p class="sub">
+          Test end-to-end from browser camera to backend detection.
+        </p>
+      </header>
+
+      <section class="panel preview">
+        <h2>Browser Camera Preview</h2>
+        <video id="camera-preview" autoplay muted playsinline></video>
+        <canvas id="frame-canvas" width="640" height="360" hidden></canvas>
+      </section>
+
+      <section class="panel controls">
+        <h2>Detection Controls</h2>
+        <form id="config-form" class="grid">
+          <label>
+            Input Mode
+            <select id="mode">
+              <option value="browser" selected>Browser Camera (getUserMedia)</option>
+              <option value="backend_camera">Backend Camera</option>
+            </select>
+          </label>
+          <label>
+            EAR Threshold
+            <input type="number" step="0.001" id="ear-threshold" value="0.224" />
+          </label>
+          <label>
+            Consecutive Frames
+            <input type="number" id="consecutive-frames" value="23" />
+          </label>
+          <label>
+            Warning Frames
+            <input type="number" id="warning-frames" value="14" />
+          </label>
+          <label>
+            Recovery Frames
+            <input type="number" id="recovery-frames" value="3" />
+          </label>
+          <label>
+            Camera Index
+            <input type="number" id="camera-index" value="0" />
+          </label>
+          <label>
+            Stage
+            <input type="number" id="stage" value="6" min="1" max="6" />
+          </label>
+        </form>
+
+        <div class="actions">
+          <button id="start-btn" class="btn primary">Start Detection</button>
+          <button id="stop-btn" class="btn danger">Stop Detection</button>
+          <button id="refresh-btn" class="btn ghost">Refresh Status</button>
+          <button id="install-btn" class="btn ghost" hidden>Install App</button>
+        </div>
+      </section>
+
+      <section class="panel status">
+        <h2>Live Runtime Status</h2>
+        <div class="chips">
+          <span class="chip" id="api-health">API: Unknown</span>
+          <span class="chip" id="service-running">Service: Unknown</span>
+          <span class="chip state-idle" id="driver-state">State: Unknown</span>
+        </div>
+
+        <div class="metrics">
+          <article class="metric-card">
+            <h3>EAR</h3>
+            <p id="ear">-</p>
+          </article>
+          <article class="metric-card">
+            <h3>Smoothed EAR</h3>
+            <p id="ear-smoothed">-</p>
+          </article>
+          <article class="metric-card">
+            <h3>FPS</h3>
+            <p id="fps">-</p>
+          </article>
+          <article class="metric-card">
+            <h3>Closed Frames</h3>
+            <p id="closed-frames">-</p>
+          </article>
+        </div>
+
+        <details>
+          <summary>Raw JSON</summary>
+          <pre id="raw-json">{}</pre>
+        </details>
+      </section>
+
+      <footer class="footnote">
+        <p id="message">Ready.</p>
+      </footer>
+    </main>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>

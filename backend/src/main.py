@@ -47,7 +47,7 @@ def main() -> None:
         )
         print("Apply suggested values with:")
         print(
-            "python src/main.py --stage 6 "
+            "python backend/src/main.py --stage 6 "
             f"--ear-threshold {threshold:.3f} "
             f"--consecutive-frames {frames}"
         )

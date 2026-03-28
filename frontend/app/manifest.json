@@ -1,0 +1,10 @@
+{
+  "name": "Driver Drowsiness Monitor",
+  "short_name": "Drowsiness",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#081421",
+  "theme_color": "#102f3f",
+  "description": "Monitor drowsiness detection from browser camera with backend API processing.",
+  "icons": []
+}

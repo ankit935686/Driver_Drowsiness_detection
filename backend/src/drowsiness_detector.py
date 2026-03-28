@@ -65,6 +65,21 @@ class DrowsinessDetector:
         self.is_drowsy = False
         self.is_warning = False
         self.smoothed_ear: Optional[float] = None
+        self._stop_requested = threading.Event()
+        self._status_lock = threading.Lock()
+        self._runtime_status = {
+            "state": "IDLE",
+            "face_detected": False,
+            "fps": 0.0,
+            "ear": None,
+            "ear_smoothed": None,
+            "closed_frames": 0,
+            "consecutive_frames": self.config.consecutive_frames,
+            "warning_frames": self.config.warning_frames,
+            "threshold": self.config.ear_threshold,
+            "stage": self.config.stage,
+            "last_update": None,
+        }
         self.alert = AlertPlayer()
 
         self._mp_face_mesh = mp.solutions.face_mesh
@@ -142,6 +157,58 @@ class DrowsinessDetector:
                 self.is_warning = False
                 self.alert.stop()
 
+    def request_stop(self) -> None:
+        self._stop_requested.set()
+
+    def clear_stop_request(self) -> None:
+        self._stop_requested.clear()
+
+    def _state_label(self) -> str:
+        if self.is_drowsy:
+            return "DROWSY"
+        if self.is_warning:
+            return "WARNING"
+        return "AWAKE"
+
+    def _update_runtime_status(
+        self,
+        *,
+        fps: Optional[float] = None,
+        ear: Optional[float] = None,
+        ear_smoothed: Optional[float] = None,
+        face_detected: Optional[bool] = None,
+    ) -> None:
+        with self._status_lock:
+            if fps is not None:
+                self._runtime_status["fps"] = float(fps)
+            if ear is not None:
+                self._runtime_status["ear"] = float(ear)
+            if ear_smoothed is not None:
+                self._runtime_status["ear_smoothed"] = float(ear_smoothed)
+            if face_detected is not None:
+                self._runtime_status["face_detected"] = bool(face_detected)
+
+            self._runtime_status["state"] = self._state_label()
+            self._runtime_status["closed_frames"] = int(self.frame_counter)
+            self._runtime_status["last_update"] = time.time()
+
+    def get_runtime_status(self) -> dict:
+        with self._status_lock:
+            return dict(self._runtime_status)
+
+    def process_external_frame(self, frame: np.ndarray, fps: Optional[float] = None) -> None:
+        self.process_frame(frame)
+        if fps is not None:
+            self._update_runtime_status(fps=fps)
+
+    def shutdown(self) -> None:
+        self.alert.stop()
+        if self._face_mesh is not None:
+            self._face_mesh.close()
+            self._face_mesh = None
+        with self._status_lock:
+            self._runtime_status["state"] = "STOPPED"
+
     def _overlay_runtime_stats(self, frame: np.ndarray, fps: float) -> None:
         cv2.putText(
             frame,
@@ -176,6 +243,7 @@ class DrowsinessDetector:
 
     def process_frame(self, frame: np.ndarray) -> np.ndarray:
         if self.config.stage == 1:
+            self._update_runtime_status(face_detected=False)
             cv2.putText(
                 frame,
                 "Step 1: Camera capture only",
@@ -275,6 +343,11 @@ class DrowsinessDetector:
                 return frame
 
             self._update_state(self.smoothed_ear)
+            self._update_runtime_status(
+                ear=avg_ear,
+                ear_smoothed=self.smoothed_ear,
+                face_detected=True,
+            )
 
             cv2.putText(
                 frame,
@@ -321,8 +394,11 @@ class DrowsinessDetector:
                 return frame
         else:
             self.frame_counter = 0
+            self.open_frame_counter = 0
             self.is_drowsy = False
+            self.is_warning = False
             self.alert.stop()
+            self._update_runtime_status(face_detected=False)
             cv2.putText(
                 frame,
                 "No face detected",
@@ -544,7 +620,10 @@ class DrowsinessDetector:
             if self._face_mesh is not None:
                 self._face_mesh.close()
 
-    def run(self) -> None:
+    def run(self, show_window: bool = True) -> None:
+        self.clear_stop_request()
+        with self._status_lock:
+            self._runtime_status["state"] = "RUNNING"
         cap = cv2.VideoCapture(self.config.camera_index)
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.config.frame_width)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.config.frame_height)
@@ -554,7 +633,7 @@ class DrowsinessDetector:
 
         try:
             prev = time.perf_counter()
-            while True:
+            while not self._stop_requested.is_set():
                 ok, frame = cap.read()
                 if not ok:
                     break
@@ -564,16 +643,17 @@ class DrowsinessDetector:
                 now = time.perf_counter()
                 fps = 1.0 / max(now - prev, 1e-6)
                 prev = now
+                self._update_runtime_status(fps=fps)
 
                 output = self.process_frame(frame)
-                self._overlay_runtime_stats(output, fps)
-                cv2.imshow("Driver Drowsiness Detection", output)
+                if show_window:
+                    self._overlay_runtime_stats(output, fps)
+                    cv2.imshow("Driver Drowsiness Detection", output)
 
-                if cv2.waitKey(1) & 0xFF == ord("q"):
-                    break
+                    if cv2.waitKey(1) & 0xFF == ord("q"):
+                        break
         finally:
-            self.alert.stop()
             cap.release()
-            cv2.destroyAllWindows()
-            if self._face_mesh is not None:
-                self._face_mesh.close()
+            if show_window:
+                cv2.destroyAllWindows()
+            self.shutdown()

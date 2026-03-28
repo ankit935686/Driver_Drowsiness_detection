@@ -18,9 +18,18 @@
       </header>
 
       <section class="panel preview">
-        <h2>Browser Camera Preview</h2>
-        <video id="camera-preview" autoplay muted playsinline></video>
-        <canvas id="frame-canvas" width="640" height="360" hidden></canvas>
+        <h2>Camera and Live Detection View</h2>
+        <div class="preview-grid">
+          <div>
+            <h3 class="preview-title">Camera Preview</h3>
+            <video id="camera-preview" autoplay muted playsinline></video>
+          </div>
+          <div>
+            <h3 class="preview-title">Live Detection (Backend)</h3>
+            <img id="detection-view" alt="Live processed detection frame" />
+          </div>
+        </div>
+        <canvas id="frame-canvas" width="360" height="202" hidden></canvas>
       </section>
 
       <section class="panel controls">
@@ -39,11 +48,11 @@
           </label>
           <label>
             Consecutive Frames
-            <input type="number" id="consecutive-frames" value="23" />
+            <input type="number" id="consecutive-frames" value="6" />
           </label>
           <label>
             Warning Frames
-            <input type="number" id="warning-frames" value="14" />
+            <input type="number" id="warning-frames" value="5" />
           </label>
           <label>
             Recovery Frames
@@ -60,10 +69,10 @@
         </form>
 
         <div class="actions">
-          <button id="start-btn" class="btn primary">Start Detection</button>
-          <button id="stop-btn" class="btn danger">Stop Detection</button>
-          <button id="refresh-btn" class="btn ghost">Refresh Status</button>
-          <button id="install-btn" class="btn ghost" hidden>Install App</button>
+          <button id="start-btn" class="btn primary" type="button">Start Detection</button>
+          <button id="stop-btn" class="btn danger" type="button">Stop Detection</button>
+          <button id="refresh-btn" class="btn ghost" type="button">Refresh Status</button>
+          <button id="install-btn" class="btn ghost" type="button" hidden>Install App</button>
         </div>
       </section>
 

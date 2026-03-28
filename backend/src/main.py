@@ -12,9 +12,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--width", type=int, default=960)
     parser.add_argument("--height", type=int, default=540)
     parser.add_argument("--ear-threshold", type=float, default=0.224)
-    parser.add_argument("--consecutive-frames", type=int, default=23)
-    parser.add_argument("--warning-frames", type=int, default=14)
+    parser.add_argument("--consecutive-frames", type=int, default=6)
+    parser.add_argument("--warning-frames", type=int, default=5)
     parser.add_argument("--recovery-frames", type=int, default=3)
+    parser.add_argument("--drowsy-seconds", type=float, default=0.6)
+    parser.add_argument("--warning-seconds", type=float, default=0.5)
+    parser.add_argument("--recovery-seconds", type=float, default=0.3)
+    parser.add_argument("--face-loss-grace-seconds", type=float, default=0.25)
     parser.add_argument("--ear-smoothing-alpha", type=float, default=0.35)
     parser.add_argument("--self-test", action="store_true")
     parser.add_argument("--frames", type=int, default=120)
@@ -32,6 +36,10 @@ def main() -> None:
         consecutive_frames=args.consecutive_frames,
         warning_frames=args.warning_frames,
         recovery_frames=args.recovery_frames,
+        drowsy_seconds=args.drowsy_seconds,
+        warning_seconds=args.warning_seconds,
+        recovery_seconds=args.recovery_seconds,
+        face_loss_grace_seconds=args.face_loss_grace_seconds,
         ear_smoothing_alpha=args.ear_smoothing_alpha,
         camera_index=args.camera_index,
         frame_width=args.width,

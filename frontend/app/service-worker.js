@@ -1,4 +1,4 @@
-const CACHE_NAME = "drowsiness-ui-v1";
+const CACHE_NAME = "drowsiness-ui-v2";
 const ASSETS = [
   "/",
   "/static/style.css",

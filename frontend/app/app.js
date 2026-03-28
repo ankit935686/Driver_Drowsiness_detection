@@ -23,6 +23,7 @@ const controls = {
 const cameraPreview = document.getElementById("camera-preview");
 const frameCanvas = document.getElementById("frame-canvas");
 const frameCtx = frameCanvas.getContext("2d");
+const detectionView = document.getElementById("detection-view");
 
 const startBtn = document.getElementById("start-btn");
 const stopBtn = document.getElementById("stop-btn");
@@ -33,18 +34,28 @@ let pollTimer = null;
 let frameTimer = null;
 let mediaStream = null;
 let deferredInstallPrompt = null;
+let frameSeq = 0;
+let frameInFlight = false;
+let activeConfig = null;
 
 function setMessage(text) {
   statusElements.message.textContent = text;
 }
 
 function readConfig() {
+  const warningFrames = Number(controls.warning.value);
+  const consecutiveFrames = Number(controls.consecutive.value);
+  const recoveryFrames = Number(controls.recovery.value);
+
   return {
     mode: controls.mode.value,
     ear_threshold: Number(controls.threshold.value),
-    consecutive_frames: Number(controls.consecutive.value),
-    warning_frames: Number(controls.warning.value),
-    recovery_frames: Number(controls.recovery.value),
+    consecutive_frames: consecutiveFrames,
+    warning_frames: warningFrames,
+    recovery_frames: recoveryFrames,
+    drowsy_seconds: consecutiveFrames / 10.0,
+    warning_seconds: warningFrames / 10.0,
+    recovery_seconds: recoveryFrames / 10.0,
     camera_index: Number(controls.camera.value),
     stage: Number(controls.stage.value),
   };
@@ -54,8 +65,8 @@ async function ensureCameraStream() {
   if (mediaStream) return;
   mediaStream = await navigator.mediaDevices.getUserMedia({
     video: {
-      width: { ideal: 640 },
-      height: { ideal: 360 },
+      width: { ideal: 480 },
+      height: { ideal: 270 },
       facingMode: "user",
     },
     audio: false,
@@ -72,11 +83,52 @@ function stopCameraStream() {
 }
 
 async function sendBrowserFrame() {
-  if (!mediaStream || cameraPreview.readyState < 2) return;
+  if (!mediaStream || cameraPreview.readyState < 2 || frameInFlight) return;
+  frameInFlight = true;
   frameCtx.drawImage(cameraPreview, 0, 0, frameCanvas.width, frameCanvas.height);
-  const image = frameCanvas.toDataURL("image/jpeg", 0.7);
-  const response = await apiPost("/detect/frame", { image });
-  renderStatus(response);
+  const image = frameCanvas.toDataURL("image/jpeg", 0.6);
+  frameSeq += 1;
+  const includeProcessedFrame = frameSeq % 8 === 0;
+
+  try {
+    let response;
+    try {
+      response = await apiPost("/detect/frame", {
+        image,
+        include_processed_frame: includeProcessedFrame,
+        include_status: false,
+        auto_start: true,
+        ...(activeConfig || readConfig()),
+      });
+    } catch (error) {
+      if (!error.message.includes("Detection is not running")) {
+        throw error;
+      }
+
+      const fallback = { ...(activeConfig || readConfig()), mode: "browser" };
+      try {
+        await apiPost("/detect/start", fallback);
+      } catch (startError) {
+        if (!startError.message.includes("already running")) {
+          throw startError;
+        }
+      }
+      response = await apiPost("/detect/frame", {
+        image,
+        include_processed_frame: includeProcessedFrame,
+        include_status: false,
+        auto_start: true,
+        ...fallback,
+      });
+    }
+
+    if (response.processed_image) {
+      detectionView.src = response.processed_image;
+    }
+    renderStatus(response);
+  } finally {
+    frameInFlight = false;
+  }
 }
 
 function startFrameLoop() {
@@ -87,7 +139,7 @@ function startFrameLoop() {
     } catch (error) {
       setMessage(error.message);
     }
-  }, 250);
+  }, 75);
 }
 
 function stopFrameLoop() {
@@ -124,11 +176,13 @@ function fmt(value, digits = 3) {
 }
 
 function renderStatus(payload) {
-  const status = payload?.status || {};
-  const runtime = status.runtime || {};
+  const status = payload?.status || null;
+  const runtime = payload?.runtime || status?.runtime || {};
   const state = runtime.state || "IDLE";
 
-  statusElements.serviceRunning.textContent = `Service: ${status.running ? "Running" : "Stopped"}`;
+  if (status) {
+    statusElements.serviceRunning.textContent = `Service: ${status.running ? "Running" : "Stopped"}`;
+  }
   statusElements.driverState.textContent = `State: ${state}`;
   statusElements.driverState.classList.remove("state-idle", "state-awake", "state-warning", "state-drowsy");
   if (state === "AWAKE") {
@@ -151,7 +205,11 @@ function renderStatus(payload) {
     statusElements.closedFrames.textContent = "-";
   }
 
-  statusElements.raw.textContent = JSON.stringify(payload, null, 2);
+  const safePayload = { ...(payload || {}) };
+  if (typeof safePayload.processed_image === "string") {
+    safePayload.processed_image = `[omitted base64 image: ${safePayload.processed_image.length} chars]`;
+  }
+  statusElements.raw.textContent = JSON.stringify(safePayload, null, 2);
 }
 
 async function refreshStatus() {
@@ -187,12 +245,21 @@ function stopPolling() {
 startBtn.addEventListener("click", async () => {
   try {
     setMessage("Starting detection...");
+    frameSeq = 0;
+    frameInFlight = false;
     const config = readConfig();
+    activeConfig = { ...config };
     if (config.mode === "browser") {
       await ensureCameraStream();
     }
 
-    await apiPost("/detect/start", config);
+    try {
+      await apiPost("/detect/start", config);
+    } catch (error) {
+      if (!error.message.includes("already running")) {
+        throw error;
+      }
+    }
     await refreshStatus();
     startPolling();
 
@@ -211,12 +278,21 @@ stopBtn.addEventListener("click", async () => {
     setMessage("Stopping detection...");
     await apiPost("/detect/stop");
     await refreshStatus();
-    stopFrameLoop();
-    stopCameraStream();
-    stopPolling();
     setMessage("Detection stopped.");
   } catch (error) {
-    setMessage(error.message);
+    if (error.message.includes("Detection is not running")) {
+      setMessage("Detection already stopped.");
+    } else {
+      setMessage(error.message);
+    }
+  } finally {
+    stopFrameLoop();
+    stopCameraStream();
+    frameSeq = 0;
+    frameInFlight = false;
+    activeConfig = null;
+    detectionView.removeAttribute("src");
+    stopPolling();
   }
 });
 

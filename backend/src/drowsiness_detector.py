@@ -18,6 +18,10 @@ class DetectorConfig:
     consecutive_frames: int = 20
     warning_frames: int = 12
     recovery_frames: int = 3
+    drowsy_seconds: float = 0.8
+    warning_seconds: float = 0.5
+    recovery_seconds: float = 0.3
+    face_loss_grace_seconds: float = 0.25
     ear_smoothing_alpha: float = 0.35
     camera_index: int = 0
     frame_width: int = 960
@@ -65,6 +69,9 @@ class DrowsinessDetector:
         self.is_drowsy = False
         self.is_warning = False
         self.smoothed_ear: Optional[float] = None
+        self._closed_since: Optional[float] = None
+        self._open_since: Optional[float] = None
+        self._face_lost_since: Optional[float] = None
         self._stop_requested = threading.Event()
         self._status_lock = threading.Lock()
         self._runtime_status = {
@@ -74,8 +81,11 @@ class DrowsinessDetector:
             "ear": None,
             "ear_smoothed": None,
             "closed_frames": 0,
+            "closed_seconds": 0.0,
             "consecutive_frames": self.config.consecutive_frames,
             "warning_frames": self.config.warning_frames,
+            "drowsy_seconds": self.config.drowsy_seconds,
+            "warning_seconds": self.config.warning_seconds,
             "threshold": self.config.ear_threshold,
             "stage": self.config.stage,
             "last_update": None,
@@ -137,21 +147,35 @@ class DrowsinessDetector:
         return (left_ear + right_ear) / 2.0
 
     def _update_state(self, avg_ear: float) -> None:
+        now = time.perf_counter()
+
         if avg_ear < self.config.ear_threshold:
+            self._open_since = None
             self.open_frame_counter = 0
             self.frame_counter += 1
-            if self.frame_counter >= self.config.consecutive_frames:
+
+            if self._closed_since is None:
+                self._closed_since = now
+
+            closed_duration = now - self._closed_since
+            if closed_duration >= self.config.drowsy_seconds:
                 self.is_drowsy = True
                 self.is_warning = True
                 if self.config.stage >= 6:
                     self.alert.start()
-            elif self.frame_counter >= self.config.warning_frames:
+            elif closed_duration >= self.config.warning_seconds:
                 self.is_warning = True
                 self.is_drowsy = False
                 self.alert.stop()
         else:
+            self._closed_since = None
             self.open_frame_counter += 1
-            if self.open_frame_counter >= self.config.recovery_frames:
+
+            if self._open_since is None:
+                self._open_since = now
+
+            open_duration = now - self._open_since
+            if open_duration >= self.config.recovery_seconds:
                 self.frame_counter = 0
                 self.is_drowsy = False
                 self.is_warning = False
@@ -190,21 +214,30 @@ class DrowsinessDetector:
 
             self._runtime_status["state"] = self._state_label()
             self._runtime_status["closed_frames"] = int(self.frame_counter)
+            if self._closed_since is None:
+                self._runtime_status["closed_seconds"] = 0.0
+            else:
+                self._runtime_status["closed_seconds"] = max(0.0, time.perf_counter() - self._closed_since)
             self._runtime_status["last_update"] = time.time()
 
     def get_runtime_status(self) -> dict:
         with self._status_lock:
             return dict(self._runtime_status)
 
-    def process_external_frame(self, frame: np.ndarray, fps: Optional[float] = None) -> None:
-        self.process_frame(frame)
+    def process_external_frame(self, frame: np.ndarray, fps: Optional[float] = None) -> np.ndarray:
+        output = self.process_frame(frame)
         if fps is not None:
             self._update_runtime_status(fps=fps)
+        return output
 
     def shutdown(self) -> None:
         self.alert.stop()
         if self._face_mesh is not None:
-            self._face_mesh.close()
+            try:
+                self._face_mesh.close()
+            except ValueError:
+                # MediaPipe may already be in a terminal state after an upstream graph error.
+                pass
             self._face_mesh = None
         with self._status_lock:
             self._runtime_status["state"] = "STOPPED"
@@ -263,6 +296,7 @@ class DrowsinessDetector:
         result = self._face_mesh.process(rgb)
 
         if result.multi_face_landmarks:
+            self._face_lost_since = None
             face_landmarks = result.multi_face_landmarks[0]
             if self.config.stage == 2:
                 h, w = frame.shape[:2]
@@ -393,11 +427,18 @@ class DrowsinessDetector:
                 )
                 return frame
         else:
-            self.frame_counter = 0
-            self.open_frame_counter = 0
-            self.is_drowsy = False
-            self.is_warning = False
-            self.alert.stop()
+            now = time.perf_counter()
+            if self._face_lost_since is None:
+                self._face_lost_since = now
+
+            if now - self._face_lost_since >= self.config.face_loss_grace_seconds:
+                self.frame_counter = 0
+                self.open_frame_counter = 0
+                self.is_drowsy = False
+                self.is_warning = False
+                self._closed_since = None
+                self._open_since = None
+                self.alert.stop()
             self._update_runtime_status(face_detected=False)
             cv2.putText(
                 frame,

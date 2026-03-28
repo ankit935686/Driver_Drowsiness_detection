@@ -16,11 +16,18 @@ from drowsiness_detector import DetectorConfig, DrowsinessDetector
 
 def _build_config(payload: Optional[dict[str, Any]]) -> DetectorConfig:
     payload = payload or {}
+    warning_frames = int(payload.get("warning_frames", 5))
+    consecutive_frames = int(payload.get("consecutive_frames", 6))
+    recovery_frames = int(payload.get("recovery_frames", 3))
     return DetectorConfig(
         ear_threshold=float(payload.get("ear_threshold", 0.224)),
-        consecutive_frames=int(payload.get("consecutive_frames", 23)),
-        warning_frames=int(payload.get("warning_frames", 14)),
-        recovery_frames=int(payload.get("recovery_frames", 3)),
+        consecutive_frames=consecutive_frames,
+        warning_frames=warning_frames,
+        recovery_frames=recovery_frames,
+        drowsy_seconds=float(payload.get("drowsy_seconds", consecutive_frames / 10.0)),
+        warning_seconds=float(payload.get("warning_seconds", warning_frames / 10.0)),
+        recovery_seconds=float(payload.get("recovery_seconds", recovery_frames / 10.0)),
+        face_loss_grace_seconds=float(payload.get("face_loss_grace_seconds", 0.25)),
         ear_smoothing_alpha=float(payload.get("ear_smoothing_alpha", 0.35)),
         camera_index=int(payload.get("camera_index", 0)),
         frame_width=int(payload.get("frame_width", 960)),
@@ -32,6 +39,7 @@ def _build_config(payload: Optional[dict[str, Any]]) -> DetectorConfig:
 class DetectionService:
     def __init__(self) -> None:
         self._lock = threading.Lock()
+        self._process_lock = threading.Lock()
         self._thread: Optional[threading.Thread] = None
         self._detector: Optional[DrowsinessDetector] = None
         self._running = False
@@ -84,20 +92,23 @@ class DetectionService:
             self._last_frame_time = None
 
         if detector is not None:
-            detector.shutdown()
+            with self._process_lock:
+                detector.shutdown()
 
         return True, "Detection stopped"
 
-    def process_browser_frame(self, image_data_url: str) -> tuple[bool, str, Optional[dict[str, Any]]]:
+    def process_browser_frame(
+        self, image_data_url: str, include_processed_frame: bool = False
+    ) -> tuple[bool, str, Optional[dict[str, Any]], Optional[str]]:
         with self._lock:
             if not self._running:
-                return False, "Detection is not running", None
+                return False, "Detection is not running", None, None
             if self._mode != "browser":
-                return False, "Detection is not in browser mode", None
+                return False, "Detection is not in browser mode", None, None
             detector = self._detector
 
         if detector is None:
-            return False, "Detector is not initialized", None
+            return False, "Detector is not initialized", None, None
 
         try:
             if "," in image_data_url:
@@ -107,7 +118,7 @@ class DetectionService:
             np_buffer = np.frombuffer(frame_bytes, dtype=np.uint8)
             frame = cv2.imdecode(np_buffer, cv2.IMREAD_COLOR)
             if frame is None:
-                return False, "Invalid frame payload", None
+                return False, "Invalid frame payload", None, None
 
             now = time.perf_counter()
             with self._lock:
@@ -118,12 +129,31 @@ class DetectionService:
             if prev is not None:
                 fps = 1.0 / max(now - prev, 1e-6)
 
-            detector.process_external_frame(frame, fps=fps)
-            return True, "Frame processed", detector.get_runtime_status()
+            with self._process_lock:
+                with self._lock:
+                    still_running = self._running and self._mode == "browser" and self._detector is detector
+                if not still_running:
+                    return False, "Detection is not running", None, None
+
+                output = detector.process_external_frame(frame, fps=fps)
+
+            processed_image = None
+            if include_processed_frame:
+                ok, encoded = cv2.imencode(
+                    ".jpg",
+                    output,
+                    [int(cv2.IMWRITE_JPEG_QUALITY), 70],
+                )
+                if ok:
+                    processed_image = "data:image/jpeg;base64," + base64.b64encode(encoded.tobytes()).decode("ascii")
+
+            with self._process_lock:
+                runtime = detector.get_runtime_status()
+            return True, "Frame processed", runtime, processed_image
         except Exception as exc:  # pragma: no cover
             with self._lock:
                 self._last_error = str(exc)
-            return False, str(exc), None
+            return False, str(exc), None, None
 
     def status(self) -> dict[str, Any]:
         with self._lock:
@@ -208,12 +238,34 @@ def detection_status() -> Any:
 def process_detection_frame() -> Any:
     payload = request.get_json(silent=True) or {}
     image = payload.get("image")
+    include_processed_frame = bool(payload.get("include_processed_frame", False))
+    include_status = bool(payload.get("include_status", False))
+    auto_start = bool(payload.get("auto_start", True))
     if not image:
         return jsonify({"ok": False, "message": "Missing image field"}), 400
 
-    ok, message, runtime = service.process_browser_frame(str(image))
+    if auto_start:
+        current_status = service.status()
+        if not current_status.get("running"):
+            auto_config = _build_config(payload)
+            service.start(auto_config, mode="browser")
+
+    ok, message, runtime, processed_image = service.process_browser_frame(
+        str(image), include_processed_frame=include_processed_frame
+    )
     status_code = 200 if ok else 409
-    return jsonify({"ok": ok, "message": message, "runtime": runtime, "status": service.status()}), status_code
+    response = {
+        "ok": ok,
+        "message": message,
+        "runtime": runtime,
+        "processed_image": processed_image,
+    }
+    if include_status:
+        response["status"] = service.status()
+
+    return jsonify(
+        response
+    ), status_code
 
 
 if __name__ == "__main__":

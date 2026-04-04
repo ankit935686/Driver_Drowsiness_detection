@@ -375,9 +375,24 @@ class DrowsinessDetector:
             f"Threshold: {self.config.ear_threshold:.3f}",
             (20, 90),
             cv2.FONT_HERSHEY_SIMPLEX,
-            0.65,
+            0.55,
             (255, 255, 255),
             2,
+            cv2.LINE_AA,
+        )
+        cv2.putText(
+            frame,
+            (
+                f"KB: R1<{self.config.alert_max_closed_seconds:.1f}s "
+                f"R2:{self.config.drowsy_min_closed_seconds:.1f}-{self.config.critical_min_closed_seconds:.1f}s "
+                f"R3>{self.config.critical_min_closed_seconds:.1f}s "
+                f"R4 blink<{self.config.tired_blink_rate_threshold:.1f}/min"
+            ),
+            (20, 112),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.5,
+            (200, 240, 255),
+            1,
             cv2.LINE_AA,
         )
 
@@ -554,6 +569,28 @@ class DrowsinessDetector:
                 2,
                 cv2.LINE_AA,
             )
+            cv2.putText(
+                frame,
+                f"Heuristic: {self._heuristic_score:.3f}",
+                (20, 285),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                (180, 220, 255),
+                2,
+                cv2.LINE_AA,
+            )
+
+            matched_ids = ", ".join([rule.split(":", 1)[0] for rule in self._matched_rules])
+            cv2.putText(
+                frame,
+                f"Matched rules: {matched_ids if matched_ids else '-'}",
+                (20, 310),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.55,
+                (210, 250, 220),
+                2,
+                cv2.LINE_AA,
+            )
 
             if self.config.stage == 5:
                 cv2.putText(
@@ -603,7 +640,7 @@ class DrowsinessDetector:
             cv2.putText(
                 frame,
                 "DROWSINESS ALERT!" if self._inferred_state == "DROWSY" else "CRITICAL FATIGUE ALERT!",
-                (20, 290),
+                (20, 340),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.9,
                 (0, 0, 255),

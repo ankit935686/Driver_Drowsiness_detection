@@ -11,7 +11,12 @@ const statusElements = {
   heuristicScore: document.getElementById("heuristic-score"),
   decisionAction: document.getElementById("decision-action"),
   matchedRules: document.getElementById("matched-rules"),
-  raw: document.getElementById("raw-json"),
+  driverStateValue: document.getElementById("driver-state-value"),
+  lastUpdate: document.getElementById("last-update"),
+  ruleR1: document.getElementById("rule-r1"),
+  ruleR2: document.getElementById("rule-r2"),
+  ruleR3: document.getElementById("rule-r3"),
+  ruleR4: document.getElementById("rule-r4"),
   message: document.getElementById("message"),
 };
 
@@ -190,6 +195,25 @@ function fmt(value, digits = 3) {
   return Number(value).toFixed(digits);
 }
 
+function setRuleActive(ruleElement, isActive) {
+  if (!ruleElement) return;
+  ruleElement.classList.toggle("rule-active", isActive);
+}
+
+function renderRuleMapping(matchedRules) {
+  const joined = Array.isArray(matchedRules) ? matchedRules.join(" ") : "";
+  setRuleActive(statusElements.ruleR1, joined.includes("R1:"));
+  setRuleActive(statusElements.ruleR2, joined.includes("R2:"));
+  setRuleActive(statusElements.ruleR3, joined.includes("R3:"));
+  setRuleActive(statusElements.ruleR4, joined.includes("R4:"));
+}
+
+function fmtTime(epochSeconds) {
+  if (!epochSeconds) return "-";
+  const d = new Date(epochSeconds * 1000);
+  return d.toLocaleTimeString();
+}
+
 function renderStatus(payload) {
   const status = payload?.status || null;
   const runtime = payload?.runtime || status?.runtime || {};
@@ -199,6 +223,7 @@ function renderStatus(payload) {
     statusElements.serviceRunning.textContent = `Service: ${status.running ? "Running" : "Stopped"}`;
   }
   statusElements.driverState.textContent = `State: ${state}`;
+  statusElements.driverStateValue.textContent = state;
   statusElements.driverState.classList.remove("state-idle", "state-alert", "state-tired", "state-drowsy", "state-critical");
   if (state === "ALERT") {
     statusElements.driverState.classList.add("state-alert");
@@ -225,15 +250,11 @@ function renderStatus(payload) {
   statusElements.blinkRate.textContent = fmt(runtime.blink_rate_per_min, 1);
   statusElements.heuristicScore.textContent = fmt(runtime.heuristic_score, 3);
   statusElements.decisionAction.textContent = runtime.decision_action || "-";
+  statusElements.lastUpdate.textContent = fmtTime(runtime.last_update);
   statusElements.matchedRules.textContent = Array.isArray(runtime.matched_rules) && runtime.matched_rules.length
     ? runtime.matched_rules.join(" | ")
     : "-";
-
-  const safePayload = { ...(payload || {}) };
-  if (typeof safePayload.processed_image === "string") {
-    safePayload.processed_image = `[omitted base64 image: ${safePayload.processed_image.length} chars]`;
-  }
-  statusElements.raw.textContent = JSON.stringify(safePayload, null, 2);
+  renderRuleMapping(runtime.matched_rules || []);
 }
 
 async function refreshStatus() {

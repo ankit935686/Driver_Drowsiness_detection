@@ -3,22 +3,44 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Driver Drowsiness Control Panel</title>
+    <title>AI Driver Drowsiness Dashboard</title>
     <link rel="manifest" href="/manifest.json" />
     <link rel="stylesheet" href="/static/style.css" />
   </head>
   <body>
     <main class="shell">
       <header class="hero">
-        <p class="eyebrow">Phase 2 Backend UI</p>
-        <h1>Driver Drowsiness Control Panel</h1>
+        <p class="eyebrow">Rule-Based AI Monitoring</p>
+        <h1>AI Driver Drowsiness Dashboard</h1>
         <p class="sub">
-          Test end-to-end from browser camera to backend detection.
+          Live expert-system inference using eye closure and blink behavior.
         </p>
       </header>
 
+      <section class="panel snapshot">
+        <h2>Inference Snapshot</h2>
+        <div class="snapshot-grid">
+          <article class="metric-card focus">
+            <h3>Current State</h3>
+            <p id="driver-state-value">-</p>
+          </article>
+          <article class="metric-card focus">
+            <h3>Decision Action</h3>
+            <p id="decision-action">-</p>
+          </article>
+          <article class="metric-card focus">
+            <h3>Heuristic Score</h3>
+            <p id="heuristic-score">-</p>
+          </article>
+          <article class="metric-card focus">
+            <h3>Last Update</h3>
+            <p id="last-update">-</p>
+          </article>
+        </div>
+      </section>
+
       <section class="panel preview">
-        <h2>Camera and Live Detection View</h2>
+        <h2>Live Camera Processing</h2>
         <div class="preview-grid">
           <div>
             <h3 class="preview-title">Camera Preview</h3>
@@ -33,8 +55,9 @@
       </section>
 
       <section class="panel controls">
-        <h2>Detection Controls</h2>
+        <h2>Configuration</h2>
         <form id="config-form" class="grid">
+          <h3 class="form-heading">Detection Inputs</h3>
           <label>
             Input Mode
             <select id="mode">
@@ -62,6 +85,8 @@
             Camera Index
             <input type="number" id="camera-index" value="0" />
           </label>
+
+          <h3 class="form-heading">AI Rule Thresholds</h3>
           <label>
             Stage
             <input type="number" id="stage" value="6" min="1" max="6" />
@@ -97,7 +122,7 @@
       </section>
 
       <section class="panel status">
-        <h2>Live Runtime Status</h2>
+        <h2>Live AI Status</h2>
         <div class="chips">
           <span class="chip" id="api-health">API: Unknown</span>
           <span class="chip" id="service-running">Service: Unknown</span>
@@ -134,19 +159,20 @@
             <p id="heuristic-score">-</p>
           </article>
           <article class="metric-card wide">
-            <h3>Decision Action</h3>
-            <p id="decision-action">-</p>
-          </article>
-          <article class="metric-card wide">
             <h3>Matched Rules</h3>
             <p id="matched-rules">-</p>
           </article>
         </div>
 
-        <details>
-          <summary>Raw JSON</summary>
-          <pre id="raw-json">{}</pre>
-        </details>
+        <div class="rule-board">
+          <h3>Knowledge Base Rule Mapping</h3>
+          <ul>
+            <li id="rule-r1">R1: IF eyes_closed_time &lt; 3 sec THEN ALERT</li>
+            <li id="rule-r2">R2: IF eyes_closed_time between 3-5 sec THEN DROWSY</li>
+            <li id="rule-r3">R3: IF eyes_closed_time &gt; 5 sec THEN CRITICAL</li>
+            <li id="rule-r4">R4: IF blink_rate below threshold THEN TIRED</li>
+          </ul>
+        </div>
       </section>
 
       <footer class="footnote">

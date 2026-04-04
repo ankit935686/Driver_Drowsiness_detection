@@ -62,10 +62,32 @@ body {
   margin-top: 0;
 }
 
+.snapshot-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.metric-card.focus {
+  background: rgba(7, 24, 37, 0.8);
+}
+
+.metric-card.focus p {
+  font-size: 1.3rem;
+}
+
 .grid {
   display: grid;
   gap: 12px;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
+.form-heading {
+  margin: 4px 0 0;
+  grid-column: 1 / -1;
+  font-size: 0.95rem;
+  color: var(--accent);
+  letter-spacing: 0.02em;
 }
 
 label {
@@ -222,6 +244,42 @@ select {
 
 .metric-card.wide {
   grid-column: span 2;
+}
+
+.rule-board {
+  margin-top: 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px;
+  background: rgba(4, 14, 23, 0.48);
+}
+
+.rule-board h3 {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.rule-board ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.rule-board li {
+  border: 1px solid rgba(176, 228, 238, 0.22);
+  border-radius: 8px;
+  padding: 8px 10px;
+  color: #d5ecf8;
+  font-size: 0.87rem;
+}
+
+.rule-board li.rule-active {
+  border-color: rgba(24, 217, 139, 0.8);
+  color: #7af0c0;
+  background: rgba(24, 217, 139, 0.12);
 }
 
 @media (max-width: 640px) {

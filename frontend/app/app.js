@@ -6,6 +6,11 @@ const statusElements = {
   earSmoothed: document.getElementById("ear-smoothed"),
   fps: document.getElementById("fps"),
   closedFrames: document.getElementById("closed-frames"),
+  closedSeconds: document.getElementById("closed-seconds"),
+  blinkRate: document.getElementById("blink-rate"),
+  heuristicScore: document.getElementById("heuristic-score"),
+  decisionAction: document.getElementById("decision-action"),
+  matchedRules: document.getElementById("matched-rules"),
   raw: document.getElementById("raw-json"),
   message: document.getElementById("message"),
 };
@@ -18,6 +23,11 @@ const controls = {
   recovery: document.getElementById("recovery-frames"),
   camera: document.getElementById("camera-index"),
   stage: document.getElementById("stage"),
+  alertMaxClosedSeconds: document.getElementById("alert-max-closed-seconds"),
+  drowsyMinClosedSeconds: document.getElementById("drowsy-min-closed-seconds"),
+  criticalMinClosedSeconds: document.getElementById("critical-min-closed-seconds"),
+  tiredBlinkRateThreshold: document.getElementById("tired-blink-rate-threshold"),
+  blinkWindowSeconds: document.getElementById("blink-window-seconds"),
 };
 
 const cameraPreview = document.getElementById("camera-preview");
@@ -58,6 +68,11 @@ function readConfig() {
     recovery_seconds: recoveryFrames / 10.0,
     camera_index: Number(controls.camera.value),
     stage: Number(controls.stage.value),
+    alert_max_closed_seconds: Number(controls.alertMaxClosedSeconds.value),
+    drowsy_min_closed_seconds: Number(controls.drowsyMinClosedSeconds.value),
+    critical_min_closed_seconds: Number(controls.criticalMinClosedSeconds.value),
+    tired_blink_rate_threshold: Number(controls.tiredBlinkRateThreshold.value),
+    blink_window_seconds: Number(controls.blinkWindowSeconds.value),
   };
 }
 
@@ -184,13 +199,15 @@ function renderStatus(payload) {
     statusElements.serviceRunning.textContent = `Service: ${status.running ? "Running" : "Stopped"}`;
   }
   statusElements.driverState.textContent = `State: ${state}`;
-  statusElements.driverState.classList.remove("state-idle", "state-awake", "state-warning", "state-drowsy");
-  if (state === "AWAKE") {
-    statusElements.driverState.classList.add("state-awake");
-  } else if (state === "WARNING") {
-    statusElements.driverState.classList.add("state-warning");
+  statusElements.driverState.classList.remove("state-idle", "state-alert", "state-tired", "state-drowsy", "state-critical");
+  if (state === "ALERT") {
+    statusElements.driverState.classList.add("state-alert");
+  } else if (state === "TIRED") {
+    statusElements.driverState.classList.add("state-tired");
   } else if (state === "DROWSY") {
     statusElements.driverState.classList.add("state-drowsy");
+  } else if (state === "CRITICAL") {
+    statusElements.driverState.classList.add("state-critical");
   } else {
     statusElements.driverState.classList.add("state-idle");
   }
@@ -204,6 +221,13 @@ function renderStatus(payload) {
   } else {
     statusElements.closedFrames.textContent = "-";
   }
+  statusElements.closedSeconds.textContent = fmt(runtime.closed_seconds, 2);
+  statusElements.blinkRate.textContent = fmt(runtime.blink_rate_per_min, 1);
+  statusElements.heuristicScore.textContent = fmt(runtime.heuristic_score, 3);
+  statusElements.decisionAction.textContent = runtime.decision_action || "-";
+  statusElements.matchedRules.textContent = Array.isArray(runtime.matched_rules) && runtime.matched_rules.length
+    ? runtime.matched_rules.join(" | ")
+    : "-";
 
   const safePayload = { ...(payload || {}) };
   if (typeof safePayload.processed_image === "string") {

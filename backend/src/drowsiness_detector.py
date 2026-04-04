@@ -27,14 +27,21 @@ class DetectorConfig:
     frame_width: int = 960
     frame_height: int = 540
     stage: int = 6
+    alert_max_closed_seconds: float = 3.0
+    drowsy_min_closed_seconds: float = 3.0
+    critical_min_closed_seconds: float = 5.0
+    tired_blink_rate_threshold: float = 12.0
+    blink_window_seconds: float = 60.0
 
 
 class AlertPlayer:
     def __init__(self) -> None:
         self._stop_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
+        self._mode = "drowsy"
 
-    def start(self) -> None:
+    def start(self, mode: str = "drowsy") -> None:
+        self._mode = mode
         if self._thread and self._thread.is_alive():
             return
         self._stop_event.clear()
@@ -49,13 +56,17 @@ class AlertPlayer:
             import winsound
 
             while not self._stop_event.is_set():
-                winsound.Beep(2000, 180)
-                time.sleep(0.05)
+                if self._mode == "critical":
+                    winsound.Beep(2300, 300)
+                    time.sleep(0.03)
+                else:
+                    winsound.Beep(2000, 180)
+                    time.sleep(0.08)
             return
 
         while not self._stop_event.is_set():
             print("\a", end="", flush=True)
-            time.sleep(0.2)
+            time.sleep(0.12 if self._mode == "critical" else 0.25)
 
 
 class DrowsinessDetector:
@@ -72,16 +83,29 @@ class DrowsinessDetector:
         self._closed_since: Optional[float] = None
         self._open_since: Optional[float] = None
         self._face_lost_since: Optional[float] = None
+        self._eye_closed = False
+        self._blink_timestamps: list[float] = []
+        self._blink_rate_per_min = 0.0
+        self._inferred_state = "ALERT"
+        self._decision_action = "NO_ACTION"
+        self._matched_rules: list[str] = []
+        self._heuristic_score = 0.0
         self._stop_requested = threading.Event()
         self._status_lock = threading.Lock()
         self._runtime_status = {
             "state": "IDLE",
+            "decision_action": "NO_ACTION",
+            "matched_rules": [],
+            "heuristic_score": 0.0,
             "face_detected": False,
             "fps": 0.0,
             "ear": None,
             "ear_smoothed": None,
             "closed_frames": 0,
             "closed_seconds": 0.0,
+            "blink_rate_per_min": 0.0,
+            "blink_window_seconds": self.config.blink_window_seconds,
+            "ai_states": ["ALERT", "TIRED", "DROWSY", "CRITICAL"],
             "consecutive_frames": self.config.consecutive_frames,
             "warning_frames": self.config.warning_frames,
             "drowsy_seconds": self.config.drowsy_seconds,
@@ -156,18 +180,19 @@ class DrowsinessDetector:
 
             if self._closed_since is None:
                 self._closed_since = now
+            self._eye_closed = True
 
             closed_duration = now - self._closed_since
             if closed_duration >= self.config.drowsy_seconds:
                 self.is_drowsy = True
                 self.is_warning = True
-                if self.config.stage >= 6:
-                    self.alert.start()
             elif closed_duration >= self.config.warning_seconds:
                 self.is_warning = True
                 self.is_drowsy = False
-                self.alert.stop()
         else:
+            if self._eye_closed:
+                self._blink_timestamps.append(now)
+            self._eye_closed = False
             self._closed_since = None
             self.open_frame_counter += 1
 
@@ -179,7 +204,92 @@ class DrowsinessDetector:
                 self.frame_counter = 0
                 self.is_drowsy = False
                 self.is_warning = False
-                self.alert.stop()
+
+    def _compute_closed_seconds(self) -> float:
+        if self._closed_since is None:
+            return 0.0
+        return max(0.0, time.perf_counter() - self._closed_since)
+
+    def _compute_blink_rate(self) -> float:
+        now = time.perf_counter()
+        window = max(5.0, self.config.blink_window_seconds)
+        self._blink_timestamps = [t for t in self._blink_timestamps if now - t <= window]
+        if not self._blink_timestamps:
+            return 0.0
+
+        elapsed = max(1e-6, min(window, now - self._blink_timestamps[0]))
+        return (len(self._blink_timestamps) / elapsed) * 60.0
+
+    def _infer_state_forward_chaining(self, closed_seconds: float, blink_rate_per_min: float) -> tuple[str, list[str], float]:
+        matched_rules: list[str] = []
+
+        if closed_seconds < self.config.alert_max_closed_seconds:
+            matched_rules.append("R1: eyes_closed_time < 3s => ALERT")
+
+        if self.config.drowsy_min_closed_seconds <= closed_seconds <= self.config.critical_min_closed_seconds:
+            matched_rules.append("R2: eyes_closed_time between 3-5s => DROWSY")
+
+        if closed_seconds > self.config.critical_min_closed_seconds:
+            matched_rules.append("R3: eyes_closed_time > 5s => CRITICAL")
+
+        if blink_rate_per_min < self.config.tired_blink_rate_threshold:
+            matched_rules.append("R4: blink_rate below threshold => TIRED")
+
+        # Heuristic score approximates fatigue in [0,1].
+        closure_score = min(1.0, closed_seconds / max(self.config.critical_min_closed_seconds, 1e-6))
+        blink_score = 0.0
+        if self.config.tired_blink_rate_threshold > 0:
+            blink_score = min(
+                1.0,
+                max(0.0, (self.config.tired_blink_rate_threshold - blink_rate_per_min) / self.config.tired_blink_rate_threshold),
+            )
+        heuristic_score = (0.7 * closure_score) + (0.3 * blink_score)
+
+        state_space = {
+            "ALERT": 0.0,
+            "TIRED": 0.35,
+            "DROWSY": 0.7,
+            "CRITICAL": 1.0,
+        }
+
+        if closed_seconds > self.config.critical_min_closed_seconds:
+            allowed_states = ["CRITICAL"]
+        elif self.config.drowsy_min_closed_seconds <= closed_seconds <= self.config.critical_min_closed_seconds:
+            allowed_states = ["DROWSY", "TIRED"]
+        elif blink_rate_per_min < self.config.tired_blink_rate_threshold:
+            allowed_states = ["TIRED", "ALERT"]
+        else:
+            allowed_states = ["ALERT"]
+
+        inferred_state = min(
+            allowed_states,
+            key=lambda s: abs(heuristic_score - state_space[s]),
+        )
+        return inferred_state, matched_rules, heuristic_score
+
+    def _decision_action_for_state(self, state: str) -> str:
+        if state == "ALERT":
+            return "NO_ACTION"
+        if state == "TIRED":
+            return "DISPLAY_WARNING"
+        if state == "DROWSY":
+            return "SOUND_ALARM"
+        if state == "CRITICAL":
+            return "CONTINUOUS_ALERT"
+        return "NO_ACTION"
+
+    def _apply_action(self, state: str) -> None:
+        if self.config.stage < 6:
+            self.alert.stop()
+            return
+
+        if state == "CRITICAL":
+            self.alert.start(mode="critical")
+            return
+        if state == "DROWSY":
+            self.alert.start(mode="drowsy")
+            return
+        self.alert.stop()
 
     def request_stop(self) -> None:
         self._stop_requested.set()
@@ -188,11 +298,7 @@ class DrowsinessDetector:
         self._stop_requested.clear()
 
     def _state_label(self) -> str:
-        if self.is_drowsy:
-            return "DROWSY"
-        if self.is_warning:
-            return "WARNING"
-        return "AWAKE"
+        return self._inferred_state
 
     def _update_runtime_status(
         self,
@@ -213,11 +319,12 @@ class DrowsinessDetector:
                 self._runtime_status["face_detected"] = bool(face_detected)
 
             self._runtime_status["state"] = self._state_label()
+            self._runtime_status["decision_action"] = self._decision_action
+            self._runtime_status["matched_rules"] = list(self._matched_rules)
+            self._runtime_status["heuristic_score"] = float(self._heuristic_score)
             self._runtime_status["closed_frames"] = int(self.frame_counter)
-            if self._closed_since is None:
-                self._runtime_status["closed_seconds"] = 0.0
-            else:
-                self._runtime_status["closed_seconds"] = max(0.0, time.perf_counter() - self._closed_since)
+            self._runtime_status["closed_seconds"] = self._compute_closed_seconds()
+            self._runtime_status["blink_rate_per_min"] = float(self._blink_rate_per_min)
             self._runtime_status["last_update"] = time.time()
 
     def get_runtime_status(self) -> dict:
@@ -377,6 +484,17 @@ class DrowsinessDetector:
                 return frame
 
             self._update_state(self.smoothed_ear)
+            closed_seconds = self._compute_closed_seconds()
+            self._blink_rate_per_min = self._compute_blink_rate()
+            self._inferred_state, self._matched_rules, self._heuristic_score = self._infer_state_forward_chaining(
+                closed_seconds,
+                self._blink_rate_per_min,
+            )
+            self._decision_action = self._decision_action_for_state(self._inferred_state)
+            self._apply_action(self._inferred_state)
+
+            self.is_drowsy = self._inferred_state in {"DROWSY", "CRITICAL"}
+            self.is_warning = self._inferred_state in {"TIRED", "DROWSY", "CRITICAL"}
             self._update_runtime_status(
                 ear=avg_ear,
                 ear_smoothed=self.smoothed_ear,
@@ -393,23 +511,46 @@ class DrowsinessDetector:
                 2,
                 cv2.LINE_AA,
             )
+            cv2.putText(
+                frame,
+                f"Closed(s): {closed_seconds:.2f}  Blink/min: {self._blink_rate_per_min:.1f}",
+                (20, 205),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.65,
+                (200, 240, 255),
+                2,
+                cv2.LINE_AA,
+            )
 
-            if self.is_drowsy:
+            if self._inferred_state == "CRITICAL":
+                state_text = "State: CRITICAL"
+                state_color = (0, 0, 255)
+            elif self._inferred_state == "DROWSY":
                 state_text = "State: DROWSY"
                 state_color = (0, 0, 255)
-            elif self.is_warning:
-                state_text = "State: WARNING"
+            elif self._inferred_state == "TIRED":
+                state_text = "State: TIRED"
                 state_color = (0, 215, 255)
             else:
-                state_text = "State: AWAKE"
+                state_text = "State: ALERT"
                 state_color = (0, 255, 0)
             cv2.putText(
                 frame,
                 state_text,
-                (20, 215),
+                (20, 235),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.7,
                 state_color,
+                2,
+                cv2.LINE_AA,
+            )
+            cv2.putText(
+                frame,
+                f"Action: {self._decision_action}",
+                (20, 260),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.65,
+                (255, 255, 255),
                 2,
                 cv2.LINE_AA,
             )
@@ -438,6 +579,13 @@ class DrowsinessDetector:
                 self.is_warning = False
                 self._closed_since = None
                 self._open_since = None
+                self._eye_closed = False
+                self._blink_timestamps.clear()
+                self._blink_rate_per_min = 0.0
+                self._inferred_state = "ALERT"
+                self._matched_rules = []
+                self._heuristic_score = 0.0
+                self._decision_action = "NO_ACTION"
                 self.alert.stop()
             self._update_runtime_status(face_detected=False)
             cv2.putText(
@@ -451,13 +599,13 @@ class DrowsinessDetector:
                 cv2.LINE_AA,
             )
 
-        if self.config.stage >= 6 and self.is_drowsy:
+        if self.config.stage >= 6 and self._inferred_state in {"DROWSY", "CRITICAL"}:
             cv2.putText(
                 frame,
-                "DROWSINESS ALERT!",
-                (20, 255),
+                "DROWSINESS ALERT!" if self._inferred_state == "DROWSY" else "CRITICAL FATIGUE ALERT!",
+                (20, 290),
                 cv2.FONT_HERSHEY_SIMPLEX,
-                1.0,
+                0.9,
                 (0, 0, 255),
                 3,
                 cv2.LINE_AA,

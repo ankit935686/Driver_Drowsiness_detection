@@ -20,6 +20,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--recovery-seconds", type=float, default=0.3)
     parser.add_argument("--face-loss-grace-seconds", type=float, default=0.25)
     parser.add_argument("--ear-smoothing-alpha", type=float, default=0.35)
+    parser.add_argument("--alert-max-closed-seconds", type=float, default=3.0)
+    parser.add_argument("--drowsy-min-closed-seconds", type=float, default=3.0)
+    parser.add_argument("--critical-min-closed-seconds", type=float, default=5.0)
+    parser.add_argument("--tired-blink-rate-threshold", type=float, default=12.0)
+    parser.add_argument("--blink-window-seconds", type=float, default=60.0)
     parser.add_argument("--self-test", action="store_true")
     parser.add_argument("--frames", type=int, default=120)
     parser.add_argument("--calibrate", action="store_true")
@@ -45,6 +50,11 @@ def main() -> None:
         frame_width=args.width,
         frame_height=args.height,
         stage=args.stage,
+        alert_max_closed_seconds=args.alert_max_closed_seconds,
+        drowsy_min_closed_seconds=args.drowsy_min_closed_seconds,
+        critical_min_closed_seconds=args.critical_min_closed_seconds,
+        tired_blink_rate_threshold=args.tired_blink_rate_threshold,
+        blink_window_seconds=args.blink_window_seconds,
     )
     detector = DrowsinessDetector(config)
     if args.calibrate:

@@ -33,6 +33,11 @@ def _build_config(payload: Optional[dict[str, Any]]) -> DetectorConfig:
         frame_width=int(payload.get("frame_width", 960)),
         frame_height=int(payload.get("frame_height", 540)),
         stage=int(payload.get("stage", 6)),
+        alert_max_closed_seconds=float(payload.get("alert_max_closed_seconds", 3.0)),
+        drowsy_min_closed_seconds=float(payload.get("drowsy_min_closed_seconds", 3.0)),
+        critical_min_closed_seconds=float(payload.get("critical_min_closed_seconds", 5.0)),
+        tired_blink_rate_threshold=float(payload.get("tired_blink_rate_threshold", 12.0)),
+        blink_window_seconds=float(payload.get("blink_window_seconds", 60.0)),
     )
 
 

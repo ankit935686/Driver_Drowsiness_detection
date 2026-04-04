@@ -66,6 +66,26 @@
             Stage
             <input type="number" id="stage" value="6" min="1" max="6" />
           </label>
+          <label>
+            Alert Max Closed (s)
+            <input type="number" id="alert-max-closed-seconds" value="3" step="0.1" />
+          </label>
+          <label>
+            Drowsy Min Closed (s)
+            <input type="number" id="drowsy-min-closed-seconds" value="3" step="0.1" />
+          </label>
+          <label>
+            Critical Min Closed (s)
+            <input type="number" id="critical-min-closed-seconds" value="5" step="0.1" />
+          </label>
+          <label>
+            Tired Blink Rate (blinks/min)
+            <input type="number" id="tired-blink-rate-threshold" value="12" step="0.1" />
+          </label>
+          <label>
+            Blink Window (s)
+            <input type="number" id="blink-window-seconds" value="60" step="1" />
+          </label>
         </form>
 
         <div class="actions">
@@ -100,6 +120,26 @@
           <article class="metric-card">
             <h3>Closed Frames</h3>
             <p id="closed-frames">-</p>
+          </article>
+          <article class="metric-card">
+            <h3>Closed Time (s)</h3>
+            <p id="closed-seconds">-</p>
+          </article>
+          <article class="metric-card">
+            <h3>Blink Rate (/min)</h3>
+            <p id="blink-rate">-</p>
+          </article>
+          <article class="metric-card">
+            <h3>Heuristic Score</h3>
+            <p id="heuristic-score">-</p>
+          </article>
+          <article class="metric-card wide">
+            <h3>Decision Action</h3>
+            <p id="decision-action">-</p>
+          </article>
+          <article class="metric-card wide">
+            <h3>Matched Rules</h3>
+            <p id="matched-rules">-</p>
           </article>
         </div>
 
